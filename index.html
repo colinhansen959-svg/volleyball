@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Super Spike Volleyball  </title>
+<style>
+  body {
+    margin: 0;
+    background: #1e90ff;
+  }
+  canvas {
+    display: block;
+    margin: auto;
+    background: #87ceeb;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="900" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const GRAVITY = 0.6;
+const GROUND = 420;
+const NET_X = canvas.width / 2;
+
+const PLAYER_SERVE_X = 200;
+const CPU_SERVE_X = 660;
+
+let keys = {};
+let gameState = "serve";
+let server = "player";
+
+let playerScore = 0;
+let cpuScore = 0;
+
+// Input
+window.addEventListener("keydown", e => keys[e.code] = true);
+window.addEventListener("keyup", e => keys[e.code] = false);
+
+// Players
+function createPlayer(x, isCPU=false) {
+  return {
+    x,
+    y: GROUND,
+    vx: 0,
+    vy: 0,
+    w: 40,
+    h: 80,
+    jumping: false,
+    isCPU
+  };
+}
+
+const player = createPlayer(PLAYER_SERVE_X);
+const cpu = createPlayer(CPU_SERVE_X, true);
+
+// Ball
+const ball = {
+  x: 0,
+  y: 0,
+  vx: 0,
+  vy: 0,
+  r: 20
+};
+
+function resetPlayersForServe() {
+  player.x = PLAYER_SERVE_X;
+  player.y = GROUND;
+  player.vx = 0;
+  player.vy = 0;
+  player.jumping = false;
+
+  cpu.x = CPU_SERVE_X;
+  cpu.y = GROUND;
+  cpu.vx = 0;
+  cpu.vy = 0;
+  cpu.jumping = false;
+}
+
+function updatePlayer(p) {
+  if (gameState === "serve") return;
+
+  if (!p.isCPU) {
+    if (keys["ArrowLeft"]) p.vx = -5;
+    else if (keys["ArrowRight"]) p.vx = 5;
+    else p.vx = 0;
+
+    if (keys["Space"] && !p.jumping) {
+      p.vy = -12;
+      p.jumping = true;
+    }
+  } else {
+  // --- SMART CPU AI ---
+
+  // Only react if ball is on CPU side
+  if (ball.x > NET_X) {
+
+  // Stand slightly BEHIND the ball so hits go over the net
+  const desiredX = ball.x + 25; // behind the ball
+  const dx = desiredX - p.x;
+
+  // Variable speed movement
+  const speed =
+    Math.abs(dx) > 120 ? 5 :
+    Math.abs(dx) > 60  ? 4 :
+                         2.5;
+
+  if (Math.abs(dx) > 4) {
+    p.vx = dx > 0 ? speed : -speed;
+  } else {
+    p.vx = 0;
+  }
+
+    // Jump ONLY when a forward hit is possible
+  if (
+    !p.jumping &&
+    ball.vy > 0 &&                 // ball is falling
+    ball.y < 340 &&                 // not too high
+    ball.y > 220 &&                 // not too low
+    Math.abs(ball.x - (p.x + p.w / 2)) < 28
+  ) {
+    p.vy = -11;
+    p.jumping = true;
+  }
+
+  } else {
+    p.vx = 0;
+  }
+}
+
+  p.vy += GRAVITY;
+  p.x += p.vx;
+  p.y += p.vy;
+
+  // Ground
+  if (p.y >= GROUND) {
+    p.y = GROUND;
+    p.vy = 0;
+    p.jumping = false;
+  }
+
+  // Net collision
+  if (!p.isCPU && p.x + p.w > NET_X - 10) {
+    p.x = NET_X - p.w - 10;
+  }
+  if (p.isCPU && p.x < NET_X + 10) {
+    p.x = NET_X + 10;
+  }
+}
+
+function serveBall(dir) {
+  if (gameState !== "serve") return;
+
+  gameState = "play";
+
+  // Big floaty serve arc
+  ball.vx = 4 * dir;   // slower horizontal speed
+  ball.vy = -16;      // much higher vertical lift
+}
+
+function updateBall() {
+  if (gameState === "serve") {
+    resetPlayersForServe();
+
+    const p = server === "player" ? player : cpu;
+    ball.x = p.x + p.w / 2;
+    ball.y = p.y - p.h - 10;
+
+    if (server === "player" && keys["Space"]) serveBall(1);
+    if (server === "cpu") setTimeout(() => serveBall(-1), 500);
+    return;
+  }
+
+  ball.vy += GRAVITY * 0.5;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // Walls
+  if (ball.x < ball.r || ball.x > canvas.width - ball.r) {
+    ball.vx *= -1;
+  }
+
+  // Net
+  // --- NET COLLISION (TOP + SIDES) ---
+
+const NET_TOP = 250;
+const NET_WIDTH = 10;
+
+// Hit top of net → bounce upward
+if (
+  ball.x > NET_X - NET_WIDTH &&
+  ball.x < NET_X + NET_WIDTH &&
+  ball.y + ball.r >= NET_TOP &&
+  ball.y + ball.r <= NET_TOP + 10 &&
+  ball.vy > 0
+) {
+  ball.y = NET_TOP - ball.r;
+  ball.vy *= -0.6;     // bounce upward (lose energy)
+}
+
+// Hit side of net → bounce sideways
+else if (
+  ball.x + ball.r > NET_X - NET_WIDTH &&
+  ball.x - ball.r < NET_X + NET_WIDTH &&
+  ball.y > NET_TOP
+) {
+  ball.vx *= -1;
+}
+
+  // Ground
+  if (ball.y > GROUND) scorePoint();
+}
+
+function hitBall(p) {
+  if (gameState !== "play") return;
+
+  const dx = ball.x - (p.x + p.w / 2);
+  const dy = ball.y - (p.y - p.h / 2);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist < ball.r + 30) {
+    ball.vy = -9;
+
+    if (p.isCPU) {
+      // CPU intentionally hits toward player side
+      ball.vx = -Math.abs(dx) * 0.18 - 1.5;
+    } else {
+      ball.vx = dx * 0.18;
+    }
+  }
+}
+
+function scorePoint() {
+  if (ball.x < NET_X) {
+    cpuScore++;
+    server = "cpu";
+  } else {
+    playerScore++;
+    server = "player";
+  }
+  gameState = "serve";
+}
+
+function drawPlayer(p, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(p.x, p.y - p.h, p.w, p.h);
+}
+
+function drawBall() {
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawNet() {
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(NET_X - 5, 250, 10, 170);
+}
+
+function drawScore() {
+  ctx.fillStyle = "#fff";
+  ctx.font = "28px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`${playerScore} : ${cpuScore}`, canvas.width / 2, 40);
+
+  if (gameState === "serve") {
+    ctx.font = "16px Arial";
+    ctx.fillText(
+      server === "player" ? "Press SPACE to Serve" : "CPU Serving...",
+      canvas.width / 2,
+      70
+    );
+  }
+}
+
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  updatePlayer(player);
+  updatePlayer(cpu);
+  updateBall();
+
+  hitBall(player);
+  hitBall(cpu);
+
+  drawNet();
+  drawPlayer(player, "#ff4444");
+  drawPlayer(cpu, "#4444ff");
+  drawBall();
+  drawScore();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
